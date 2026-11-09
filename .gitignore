@@ -31,6 +31,17 @@ yarn-error.log*
 
 # env files (can opt-in for commiting if needed)
 .env*
+*.key
+credentials*.json
+/.aws/
+/.codex/
+/.agents/
+
+# local temporary files
+/.tmp/
+/tmp/
+*.tmp
+*.log
 
 # vercel
 .vercel
