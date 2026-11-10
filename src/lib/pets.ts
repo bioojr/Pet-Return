@@ -20,7 +20,7 @@ export const dateLabel = (value: string) => new Date(`${value}T12:00:00`).toLoca
 export function isPet(value: unknown): value is Pet {
  if (!value || typeof value !== "object") return false;
  const p = value as Pet;
- return ["id", "name", "breed", "color", "description", "city", "neighborhood", "createdAt"].every(k => typeof p[k as keyof Pet] === "string") && p.id.startsWith("local-") && ["perdido", "encontrado"].includes(p.status) && species.includes(p.species) && sizes.includes(p.size) && sexes.includes(p.sex) && illustrations.includes(p.illustration) && ["ativo", "pausado", "reencontrado"].includes(p.state) && validDate(p.date);
+ return ["id", "name", "species", "breed", "color", "size", "sex", "description", "city", "neighborhood", "illustration", "status", "createdAt"].every(k => typeof p[k as keyof Pet] === "string") && p.id.startsWith("local-") && !!p.name.trim() && ["ativo", "pausado", "reencontrado"].includes(p.state) && validDate(p.date) && !Number.isNaN(Date.parse(p.createdAt)) && Object.keys(validatePet(p,p.date)).length === 0;
 }
 export type Filters = { q: string; regiao: string; status: string; species: string; size: string; sex: string };
 export const blankFilters: Filters = { q: "", regiao: "", status: "", species: "", size: "", sex: "" };
@@ -29,6 +29,8 @@ export function validDate(value: string) { return typeof value === "string" && /
 export type PetFields = Omit<Pet,"id" | "state" | "createdAt">;
 export function validatePet(fields: PetFields, today: string): Record<string,string> {
  const errors: Record<string,string> = {};
+ for(const [key, options] of [["status",["perdido","encontrado"]],["species",species],["size",sizes],["sex",sexes],["illustration",illustrations]] as [keyof PetFields,string[]][]) if(!options.includes(fields[key])) errors[key] = "Selecione uma opção válida.";
+ for(const key of ["name","breed","color","city","neighborhood"] as const) if(fields[key].length > 90) errors[key] = "Use até 90 caracteres.";
  if(fields.status === "perdido" && !fields.name.trim()) errors.name = "Informe o nome do pet perdido.";
  for(const [key,label] of [["color","a cor"],["size","o porte"],["sex","o sexo"],["city","a cidade"],["neighborhood","o bairro"],["description","uma descrição"]]) if(!fields[key as keyof PetFields].trim()) errors[key] = `Informe ${label}.`;
  if(fields.description.trim().length < 20) errors.description = "Descreva o animal com pelo menos 20 caracteres.";
@@ -45,6 +47,24 @@ export function decodeData(raw: string | null): LocalData {
  if(!parsed || !Array.isArray(parsed.pets) || !parsed.pets.every(isPet) || !Array.isArray(parsed.favorites) || !parsed.favorites.every((v: unknown) => typeof v === "string") || new Set(parsed.pets.map((p: Pet) => p.id)).size !== parsed.pets.length) throw new Error("Dados locais inválidos");
  return { pets: parsed.pets, favorites: [...new Set<string>(parsed.favorites)] };
 }
-export function savePet(data: LocalData, pet: Pet): LocalData { return { ...data, pets: [pet, ...data.pets.filter(p => p.id !== pet.id)] }; }
+export function savePet(data: LocalData, pet: Pet): LocalData { return { ...data, pets: data.pets.some(p => p.id === pet.id) ? data.pets.map(p => p.id === pet.id ? pet : p) : [pet, ...data.pets] }; }
 export function deletePet(data: LocalData, id: string): LocalData { return { pets: data.pets.filter(p => p.id !== id), favorites: data.favorites.filter(f => f !== id) }; }
 export function toggleFavorite(data: LocalData, id: string): LocalData { return { ...data, favorites: data.favorites.includes(id) ? data.favorites.filter(f => f !== id) : [...data.favorites, id] }; }
+export function newestPets(pets: Pet[]) { return [...pets].sort((a,b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)); }
+
+type StoragePort = Pick<Storage,"getItem" | "setItem">;
+export function persistChange(storage: StoragePort | null, current: LocalData, change: (data: LocalData) => LocalData, reset = false, volatile = false): { data: LocalData; warning: string; saved: boolean; blocked: boolean } {
+ const unavailable = "O armazenamento está indisponível ou cheio. As alterações duram somente nesta sessão.";
+ if(!storage) return { data: change(current), warning: unavailable, saved: false, blocked: false };
+ let base = current;
+ if(!reset) {
+  let raw: string | null;
+  try { raw = storage.getItem(storageKey); }
+  catch { return { data: change(current), warning: unavailable, saved: false, blocked: false }; }
+  try { const stored = decodeData(raw); if(!volatile) base = stored; }
+  catch { return { data: change(current), warning: "Os dados salvos são inválidos e foram preservados. Novas alterações ficam nesta sessão. Para substituí-los, use Restaurar dados na Ajuda.", saved: false, blocked: true }; }
+ }
+ const data = change(base);
+ try { storage.setItem(storageKey,JSON.stringify(data)); return { data, warning: "", saved: true, blocked: false }; }
+ catch { return { data, warning: unavailable, saved: false, blocked: false }; }
+}

@@ -9,19 +9,21 @@ type Fields = Omit<Pet,"id" | "state" | "createdAt">;
 const initial: Fields = { name:"", status:"perdido", species:"Cachorro", breed:"", color:"", size:"", sex:"", description:"", city:"", neighborhood:"", date:"", illustration:"dog-caramel" };
 const artNames = ["Cão caramelo", "Gato laranja", "Cão branco", "Gato cinza", "Coelho", "Cão preto"];
 function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
-export function PetForm() {
+export function PetForm({ editId = null, initialStatus = "perdido" }: { editId?: string | null; initialStatus?: Pet["status"] }) {
  const store = usePets(); const router = useRouter();
- const [fields, setFields] = useState<Fields>(initial); const [editId, setEditId] = useState<string | null>(null); const [initialized, setInitialized] = useState(false);
+ const [fields, setFields] = useState<Fields>(initial); const [initialized, setInitialized] = useState(false);
  const [errors, setErrors] = useState<Record<string,string>>({}); const [submitted, setSubmitted] = useState(false);
- useEffect(() => { if(!store.ready || initialized) return; const params = new URLSearchParams(window.location.search); const edit = params.get("editar"); setEditId(edit); const pet = store.pets.find(p => p.id === edit); if(pet) setFields(pet); else setFields(f => ({...f, date:today(), status:params.get("status") === "encontrado" ? "encontrado" : "perdido"})); setInitialized(true); }, [store.ready,store.pets,initialized]);
+ useEffect(() => { if(!store.ready || initialized) return; const pet = store.pets.find(p => p.id === editId); setFields(pet || {...initial, date:today(), status:initialStatus}); setInitialized(true); }, [store.ready,store.pets,initialized,editId,initialStatus]);
  function change(key: keyof Fields, value: string) { setFields(f => ({...f,[key]:value})); setErrors(e => ({...e,[key]:""})); }
- function submit(e: FormEvent<HTMLFormElement>) {
+ async function submit(e: FormEvent<HTMLFormElement>) {
   e.preventDefault(); const next = validatePet(fields,today());
   setErrors(next);
   if(Object.keys(next).length) { requestAnimationFrame(() => document.getElementById(`pet-${Object.keys(next)[0]}`)?.focus()); return; }
   const original = store.pets.find(p => p.id === editId);
   const pet: Pet = { ...fields, name:fields.name.trim() || `${fields.species === "Outro" ? "Animal" : fields.species} encontrado`, breed:fields.breed.trim(), color:fields.color.trim(), city:fields.city.trim(), neighborhood:fields.neighborhood.trim(), description:fields.description.trim(), id:original?.id || `local-${crypto.randomUUID()}`, state:original?.state || "ativo", createdAt:original?.createdAt || new Date().toISOString() };
-  setSubmitted(true); store.save(pet); router.push(`/pet/${pet.id}`);
+  setSubmitted(true);
+  try { await store.save(pet); router.push(`/pet/${pet.id}`); }
+  catch { setSubmitted(false); setErrors({submit:"Não foi possível concluir o cadastro. Tente novamente."}); }
  }
  if(!initialized) return <div className="container page">Preparando o formulário…</div>;
  if(editId && !store.pets.some(p => p.id === editId)) return <div className="container page"><Empty title="Não encontramos seu anúncio." text="Somente anúncios criados neste navegador podem ser editados." action="Ver meus anúncios" href="/meus-anuncios"/></div>;
